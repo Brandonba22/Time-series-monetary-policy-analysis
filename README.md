@@ -14,7 +14,7 @@ To empirically evaluate the transmission of monetary policy shocks using recent 
 - Transforms and structures monthly time series data for SVAR modeling
 - Estimates and interprets impulse response functions (IRFs)
 - Visualizes interest rate shock effects using `ggplot2`
-- Clean `.Rmd` file for replication, reporting, or academic submission
+- Clean `.R` file for replication, or reporting.
 
 ## Repository Contents
 ## Libraries Used
