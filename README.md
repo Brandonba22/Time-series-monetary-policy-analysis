@@ -23,10 +23,13 @@ To empirically evaluate the transmission of monetary policy shocks using recent 
 - `zoo`, `lubridate`, `dplyr` – Time handling and manipulation
 - `vars`, `urca` – Vector autoregression and stationarity testing
 - `ggplot2` – Visualization
+- `RDM file` – Report Composition
 
 ## Data Source
 
 All macroeconomic data was sourced from the [Federal Reserve Economic Database (FRED)](https://fred.stlouisfed.org/), covering the period from January 1990 to December 2024.
+
+All financial market data was sourced from Yahoo Finance using the tidyquant package in R, covering the period from January 1990 to December 2024.
 
 ## Potential Extensions
 
