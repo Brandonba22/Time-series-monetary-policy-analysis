@@ -1,9 +1,25 @@
 ---
-title: "An analysis of the channel of monetary policy"
-author: "Brandon Arnold"
-date: "2025-05-04"
+title: ""
+author: ""
+date: ""
 output: pdf_document
 ---
+
+\begin{titlepage}
+\centering
+\vspace*{5cm}
+
+{\Huge \bfseries Monetary Policy Analysis \par}
+\vspace{2cm}
+
+{\Large \textit{An Empirical Approach to Interest Rate Shocks} \par}
+\vspace{2cm}
+
+{\Large Brandon Arnold \par}
+\vspace{1cm}
+
+\vfill
+\end{titlepage}
 \newpage
 ```{r loading packages, include=FALSE}
 #------------------
