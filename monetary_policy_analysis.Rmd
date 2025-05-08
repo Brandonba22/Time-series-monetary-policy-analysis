@@ -1,0 +1,458 @@
+---
+title: "An analysis of the channel of monetary policy"
+author: "Brandon Arnold"
+date: "2025-05-04"
+output: pdf_document
+---
+\newpage
+```{r loading packages, include=FALSE}
+#------------------
+# loading packages
+#------------------
+library(tinytex)
+library(modelsummary)
+library(svars)
+library(dplyr)
+library(magrittr)
+library(tidyquant)
+library(timetk)
+library(tibbletime)
+library(tsibble)
+library(vars)           # package that allows to estimate and analyze VAR models
+library(broom)
+library(stargazer)
+library(listviewer)
+library(ggplot2)
+library(ggfortify)
+library(qqplotr)
+library(scales)
+library(plotly)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(knitr)
+library(patchwork)
+```
+\begin{center}
+\underline{\Large \textbf{Abstract}}
+\end{center}
+In this paper we'll investigates the complex relationships between monetary policy and key macroeconomic indicators. The main variables of focus are: real stock investments measured using the S&P 500, the M3 unemployment rate, and inflation using the core PCEI as the metric. Monetary policy is observed by using the federal funds rate. Which in this model will be assumed as the primary tool used by the Federal Reserve to influence aggregate demand and manages their dual mandate of unemployment and inflation.
+
+In order to capture the complex interactions and feedback mechanisms among these variables it's imperative to employ a Structural Vector Autoregression framework. This methodology allows us to examine the structural shocks and trace their dynamic effects over time through impulse response functions. Primarily we'll focus on identifying how a contractionary monetary policy affects real stock investments and then unemployment and inflation, both in the short and medium run.
+
+We'll implement IRF analysis and Granger causality tests to assess the predictive power of monetary policy relative to other macroeconomic indicators. This tests provide insight into whether changes in the federal funds rate systematically precede movements in inflation and unemployment. Another factor of note is whether financial market variables like real stock returns offer additional explanatory power.
+
+We'll be using monthly data from 1990 to 2024. The findings of this paper support theoretical expectations: interest rate shocks tend to suppress inflation over time while exerting upward pressure on unemployment. Another thing of not is that the evidence highlights the rapid adjustment of financial markets relative to real economic variables reinforcing the importance of timing and sequencing in policy interventions.
+\begin{center}
+\underline{\Large \textbf{Introduction}}
+\end{center}
+Understanding how monetary policy affects macroeconomic outcomes remains a central focus in literature. The Federal Reserve in the United States uses interest rate adjustments as their primary tool for steering the economy and smoothing inflation. Monetary Policy influence borrowing costs, changes savings behavior, drives capital demand, and ultimately gives the Federal Reserve the power to influence aggregate demand.
+
+Interest rate manipulation is a key instrument in monetary policy. It's effect are channeled through investment. This is because in theory investments become more or less attractive as the interest rate rises or falls. When interest rates rise the cost of borrowing increases, and this often leads to a reduction in firm investments. The same logic also works in the other direction and lower rates stimulate economic activity and increase aggregate demand. It's through this manipulation of interest rate that the Federal Reserve hopes to target it's dual mandate. The impact of these rate changes are not instantaneous and often lags, several variables like inflation and unemployment are sticky.
+
+This study wants to estimate the effects of monetary policy on the Federal Reserves dual mandate. While economic theory proposes the link between unemployment and inflation, and monetary policy takes advantage of this link. We'll also examine financial equity markets. These forward looking markets often react rapidly to shifts in monetary policy, and gauge expectations about future economic performance.
+
+We'll apply time series econometric techniques using monthly data from 1990 to 2024. It's derived from the Federal Reserve Economic Data also known as FRED and Yahoo Finance. This approach leverages Structural Vector Autoregression (SVAR) to uncover the structural effects of policy shocks and to better understand the transmission mechanisms of monetary policy over time.
+\newpage
+\begin{center}
+\underline{\Large \textbf{Economic Theory Review}}
+\end{center}
+Monetary policy plays a central role in economic stability This is primarily through its influence on aggregate demand. The Federal Reserve uses the federal funds rate as its key policy tool to achieve its dual mandate. The Federal Reserve try and target a 2% inflation rate, and the natural rate of unemployment. Changes in the federal funds rate affect the economy through primarily investment.
+\begin{center}
+\underline{\textbf{\small Interest Rates \& Inflation}}
+\end{center}
+The relationship between interest rates and inflation is grounded in aggregate demand theory. When the central bank raises the federal funds rate, borrowing becomes more expensive. This leads to a reduction in investment. This contraction in aggregate demand puts downward pressure on prices, thereby lowering inflation.
+
+However, inflation is sticky and does not respond immediately. This stickiness is because prices and expectation often adjusts in time. This means there's a lag in transmission. This delayed response makes the implementation of a structural model attractive In order to understand the timing and magnitude of inflation's reaction to monetary shocks.
+\begin{center}
+\underline{\textbf{\small Interest Rates \& Unemployment}}
+\end{center}
+Interest rates also influence the labor market through business cycle effects. Higher interest rates slow down economic activity reduces a firms’ revenue and profit expectations. This may lead to hiring freezes or layoffs. This increases the unemployment rate. However, if monetary policy successfully stabilizes inflation the economy will return to its natural rate of unemployment.
+
+This relationship is reflected in the short run Phillips Curve framework, where monetary policy can influence the output gap and hence unemployment in the short run.
+\begin{center}
+\underline{\textbf{\small Interest Rates \& Financial Markets}}
+\end{center}
+Financial markets respond quickly to interest rate changes. Monetary policy signals contain information about the central bank’s outlook and this can directly affects investor sentiment and risk appetite.
+
+Stock returns are forward looking indicators and incorperate monetary policy expectations and future macroeconomic conditions. Because of their speed and sensitivity, asset markets can serve as transmission mechanisms through which policy affects the investment in an economy.
+\begin{center}
+\underline{\textbf{\small Svar Order}}
+\end{center}
+These relationships justify the use of a Structural Vector Autoregression framework. SVAR allows for contemporaneous relationships to be explicitly structured based on economic theory. In our identification strategy, we assume:
+
+Monetary policy shocks - affect other variables contemporaneously but are not affected by them within the same month.
+
+Stock returns - respond immediately to interest rate shocks and embed expectations about future macro conditions.
+
+Unemployment and then inflation adjust more sluggishly due to real rigidities, and sticky factors.
+
+So in theory Federal Fund Rates -> Equity markets -> unemployment -> inflation
+```{r loading the data, include=FALSE,warning=FALSE, message=FALSE}
+#-----------------
+#loading the data
+#-----------------
+# getting economic data
+macro_data <- tq_get(c("FEDFUNDS", "UNRATE", "PCEPILFE"), 
+                     get = "economic.data",
+                     from = "1990-01-01", to = "2024-12-31") %>%
+  mutate(monthyear = as.yearmon(date))
+# Get Monthly S&P 500 Prices 
+sp500_raw <- tq_get("^GSPC", get = "stock.prices", 
+                    from = "1990-01-01", to = "2024-12-31") %>%
+  select(date, adjusted) %>%
+  mutate(monthyear = as.yearmon(date)) %>%
+  group_by(monthyear) %>%
+  summarise(SP500 = mean(adjusted), .groups = "drop")
+# Reshape Economic Data to Wide Format 
+macro_wide <- macro_data %>%
+  select(monthyear, symbol, price)
+macro_wide <- macro_data %>%
+  select(monthyear, symbol, price) %>%
+  pivot_wider(names_from = symbol, values_from = price)
+# Merge & Transform 
+combined <- macro_wide %>%
+  inner_join(sp500_raw, by = "monthyear") %>%
+  arrange(monthyear) %>%
+  mutate(log_sp500 = log(SP500),log_pce = log(PCEPILFE),
+    dlrSP500 = 100 * ((log_sp500 - lag(log_sp500)) - (log_pce - lag(log_pce))),  # real return
+    INFL = 100 * (log_pce - lag(log_pce)),                                       # core PCE inflation
+    FF = FEDFUNDS                                                                # interest rate
+  ) %>%
+  select(monthyear, FF, dlrSP500, UNRATE, INFL)%>%
+  drop_na()
+```
+\newpage
+\begin{center}
+\underline{\Large \textbf{Methodolgy}}
+\end{center}
+
+This section outlines our empirical process used to evaluate the relationships between monetary policy and key macroeconomic indicators. Our approach consists of preparing and transforming the data, and testing for stationarity. Then estimating a Vector Autoregression model, conducting impulse response analysis. Then we'll be performing Granger causality tests, and finally estimating a Structural VAR using Cholesky decomposition. 
+
+\begin{center}
+\underline{\small \textbf{Stationarity}}
+\end{center}
+
+The first step in our analysis is to ensure stationarity within our variables. It's crucial to ensure that all time series variables are stationary. Having stationarity implies that the statistical properties of the series being observed have a constant mean, approximately constant variance, and autocorrelation. Non-stationary within our variables can lead to unreliable regression results,and misleading inference in impulse response analysis.
+
+To evaluate the stationarity of our variables, we will first conduct a standard visual inspection of our level variables and if needed use methods to try and gain stationarity within the variables of interest.
+
+```{r Checking if stationary1, echo=FALSE,warning=FALSE, message=FALSE}
+  #  S&P 500 Index Level
+q1 <- ggplot(sp500_raw, aes(x = monthyear)) +
+  geom_line(aes(y = SP500), color = "gold") +
+  labs(title = "S&P 500 Index Level", y = "Index Level", x = "Date")
+
+#  Unemployment Rate
+q2 <- ggplot(macro_wide, aes(x = monthyear)) +
+  geom_line(aes(y = UNRATE), color = "purple") +
+  labs(title = "Unemployment Rate", y = "Percent", x = "Date")
+
+# Federal Funds Rate
+q3 <- ggplot(macro_wide, aes(x = monthyear)) +
+  geom_line(aes(y = FEDFUNDS), color = "orange") +
+  labs(title = "Federal Funds Rate", y = "Percent", x = "Date")
+
+#Core PCE Inflation Index
+q4 <- ggplot(macro_wide, aes(x = monthyear)) +
+  geom_line(aes(y = PCEPILFE), color = "red") +
+  labs(title = "Core PCE Inflation Index", y = "Index Level", x = "Date")
+
+# Combine plots 
+(q1 | q2) / (q3 | q4)
+```
+It's clear from both visual inspection that the level values of the inflation rate and S&P 500 returns display strong linear trends over time, and violating the core assumption of stationarity. 
+
+We'll apply log differencing to these variables. This transformation approximates percentage change between periods, and effectively converts trending series into growth rates. This gives us the monthly percentage change in core inflation and the monthly percentage change in real S&P 500 returns.
+
+By differencing we remove trends seen and possibly stabilize both the mean and variance over time. This not only improves the statistical properties of the data but also aligns it with the assumptions underlying the VAR model. As a result, the transformed series are more likely to be stationary and provide reliable estimates when evaluating dynamic interactions among macroeconomic variables.
+
+
+
+Table 1
+```{r checking the to dataframe, echo=FALSE,warning=FALSE, message=FALSE}
+# checking the to dataframe 
+head(combined, 6) %>%
+  kable(caption = "Table 1: Sample of Combined Time Series Data", digits = 2)
+```
+ Table 1 highlights the time series plots of our transformed variables. In the head of the dataframe, with inflation and S&P 500 data in their tranformed state. The log differencing was implemented to address non-stationarity. This formatting allows us to analyze percentage changes over time rather than raw levels, making the series more suitable for Vector Auto Regression analysis.
+\begin{center}
+```{r Checking if stationary, echo=FALSE,warning=FALSE, message=FALSE, fig.align='center', out.width='80%'}
+#----------------------------
+# Checking if stationary
+#----------------------------
+p1 <- ggplot(combined, aes(x = monthyear)) +
+  geom_line(aes(y = UNRATE), color = "gold") +
+  labs(title = "Unemployment Rate", y = "Level", x = "Date")
+
+p2 <- ggplot(combined, aes(x = monthyear)) +
+  geom_line(aes(y = dlrSP500), color = "purple") +
+  labs(title = "S&P 500 Real Return", y = "Level", x = "Date")
+
+p3 <- ggplot(combined, aes(x = monthyear)) +
+  geom_line(aes(y = FF), color = "orange") +
+  labs(title = "Federal Funds Rate", y = "Level", x = "Date")
+
+p4 <- ggplot(combined, aes(x = monthyear)) +
+  geom_line(aes(y = INFL), color = "red") +
+  labs(title = "Core PCE Inflation", y = "Level", x = "Date")
+
+(p1 | p2) / (p3 | p4)
+```
+\end{center}
+The prominent trends within the inflation rate and S&P 500 returns have been mitigated through log-differencing. The visual inspection suggests these series now exhibit stationary behavior. However, more robust statistical test is necessary to confirm stationarity. To that end, we apply the Augmented Dickey Fuller test under the assumption of a drift term. This specification accounts for the possibility of a non-zero mean in the absence of a deterministic trend.
+
+The hypotheses for the ADF test are as follows:
+    Ho~ Has a unit root (non-stationary)
+    Ha~ The series is stationary around a drift (ie. a constant mean)
+
+Rejecting the null hypothesis shows that the series is stationary and usable for inclusion in the VAR framework without further transformation.
+
+
+table 2
+```{r ADF test , include=FALSE, warning=FALSE, message=FALSE}
+#-------------
+# ADF test 
+#-------------
+# federal funds rate (non-stationary)
+adf_ff <- ur.df(combined$FF, type = "drift", selectlags = "AIC") 
+summary(adf_ff)
+# inflation (stationary)
+adf_INFL <- ur.df(combined$INFL, type = "drift", selectlags = "AIC") 
+summary(adf_INFL)
+# unemployment (stationary)
+adf_uem <- ur.df(combined$UNRATE, type = "drift", selectlags = "AIC") 
+summary(adf_uem)
+# Sp500 (stationary)
+adf_500 <- ur.df(combined$dlrSP500, type = "drift", selectlags = "AIC") 
+summary(adf_500)
+```
+
+```{r ADf summary table, echo=FALSE}
+# Create a summary table
+adf_summary <- tibble::tibble(
+  Variable = c("FF", "dlrSP500", "UNRATE", "INFL"),
+  Test_Statistic = c(-2.488, -13.701, -3.355, -9.569),
+  `1% Critical` = rep(-3.44, 4),
+  `5% Critical` = rep(-2.87, 4),
+  `10% Critical` = rep(-2.57, 4),
+  Stationary = c("No", "Yes", "Yes", "Yes")
+)
+# Print the table
+kable(adf_summary, caption = "ADF Test Results: Stationarity of Variables", digits = 3)
+```
+Table 2 shows the results of the Augmented Dickey Fuller test for each variable. The test statistics for the unemployment rate, log-differenced S&P 500 returns, and log-differenced inflation all fall below the 1% critical value. Allowing us to reject the null hypothesis of a unit root and conclude that these variables are stationary. However, the Federal Funds Rate has a test statistic of -2.488. This exceeds all critical thresholds; therefore, indicating that we cannot reject the null hypothesis of non-stationarity.
+
+However, we retain the Federal Funds Rate in levels. This decision is consistent with empirical practices in monetary economics. Researchers such as Brischetto and Voss (1999) and Sims (1992) argue that differencing interest rates removes essential long-run information and hinders the interpretability of monetary policy shocks. The Federal Funds Rate is a policy-controlled instrument and generally treated as exogenous. Modeling it in levels preserves its structural meaning in SVAR analysis.
+
+\begin{center}
+\underline{\small \textbf{Var Analysis}}
+\end{center}
+
+Vector Autoregression is a statistical model that captures the linear interdependencies among multiple time series. In a Vector Auto Regression each variable is expressed as a linear function of its own past values and the past values of all other variables in the system. This is especially useful in analyzing prolonged interconnected effects. where variables often evolve together over time and influence one another with lags.
+
+There are several key assumptions with the Vector Auto Regression model. It assumes: Stationarity, linear form, large sample size, and no perfect multicolinearity. It's important to highlight that the only reason Federal funds rate isn't differenced is for interpretability and surmise exogeneity..
+
+\[
+\begin{bmatrix}
+y_{1,t} \\
+y_{2,t} \\
+\vdots \\
+y_{k,t}
+\end{bmatrix}
+=
+A_1
+\begin{bmatrix}
+y_{1,t-1} \\
+y_{2,t-1} \\
+\vdots \\
+y_{k,t-1}
+\end{bmatrix}
++
+A_2
+\begin{bmatrix}
+y_{1,t-2} \\
+y_{2,t-2} \\
+\vdots \\
+y_{k,t-2}
+\end{bmatrix}
++ \cdots +
+A_p
+\begin{bmatrix}
+y_{1,t-p} \\
+y_{2,t-p} \\
+\vdots \\
+y_{k,t-p}
+\end{bmatrix}
++
+C +
+\begin{bmatrix}
+\varepsilon_{1,t} \\
+\varepsilon_{2,t} \\
+\vdots \\
+\varepsilon_{k,t}
+\end{bmatrix}
+\]
+
+Estimating a reduced-form VAR is the first step before proceeding to a Structural Vector Auto Regression. Structural Vector Auto Regression puts in place theoretical restrictions to distinguish policy shocks from responses. However, a VAR provides the necessary foundations to find lag structure, and dynamic patterns. Meaning it's an imperative next step.
+```{r ts convert, echo=FALSE, warning=FALSE, message=FALSE}
+#-------------------
+# var
+#-------------------
+# Create ts object
+Y <- ts(combined[, c("FF", "dlrSP500", "UNRATE", "INFL")], start = c(1990, 1), frequency = 12)
+```
+An important step in estimating a Vector Auto Regression model is determining the optimal number of lags. If we select too few lags it can lead to omitted variable bias and underfitting; however too many lags can cause overfitting within our model. We'll rely on the Akaike Information Criterion (ie. AIC). This is a commonly used method to find the optimal number of lags because AIC punishes additional lags unless they provide a good improvements in the model’s explanatory power. In this paper we use R VARselect function to evaluates multiple lag lengths and calculates the AIC for each one. The lag with the lowest AIC value is selected as optimal.
+\newpage
+Var Select output
+```{r var, echo=FALSE, warning=FALSE, message=FALSE}
+# Use VARselect to determine optimal lags
+vselect <- vars::VARselect(Y, lag.max = 8, type = "const")
+print(vselect$selection)
+
+# Estimate the VAR model using aic
+optimal_lag <- vselect$selection["AIC(n)"]
+
+v_model <- vars::VAR(Y, p = optimal_lag, type = "const")
+
+
+```
+
+\begin{center}
+\underline{\small \textbf{Impulse Response Functions}}
+\end{center}
+
+This process determined that our model would perform best with 6 lags. This allows us to capture the interactions among variables over a sufficient time horizon. This ensures that key delayed effects are not omitted while avoiding excessive complexity that could compromise estimation efficiency.
+
+With the optimal number of lags selected we can estimate the VAR model estimated. Estimating this model allows us to examine the Impulse Response Function. This helps us to better understand the dynamic relationships between our variables.
+
+The impulse response function looks at the effect of a shock to one endogenous variable on the current and future values of all variables in the system. How one impulse/change in one variable affects the others. We're examining how a shock to the Federal Funds Rate affects the S&P 500 real returns, Unemployment Rate, and Inflation over time.
+
+On the x-axis of an Impulse response function is the time horizon following the initial shock, in our case in months and on the y-axis measures the magnitude of the shock in either the positive of negative direction.
+
+```{r Impulse response functions, echo=FALSE}
+#----------------------------
+# Impulse response functions
+#----------------------------
+# Generate impulse response functions from FF shock
+irf_results <- vars::irf(v_model, impulse = "FF", response = c("dlrSP500", "UNRATE", "INFL"), 
+                   n.ahead = 24, boot = TRUE)
+
+# Plot the IRFs
+plot(irf_results)
+```
+Above we show Impulse response function plot. Our impulse of interest in this case happens to be Federal Funds Rate. We do see some reactions to the changes in the federal funds rate in almost all of our response variables. There is a rapid degree of change early one in the S&P 500. This conforms to theory since equity markets are supposed to be quick reacting to changes in interest rate. Unemployment is also behaving according to theory. This slow to react to the changes but overtime adjust to the changed rate. Reflecting the ideas of rigidity in unemployment. The only measure seemed unmoved by this happens 
+
+The figure above displays the impulse response functions for S&P 500 real returns, Unemployment Rate, and Inflation to a one standard deviation shock in the Federal Funds Rate. We do see some reactions to the changes in the federal funds rate in almost all of our response variables.
+
+
+In S&P 500 real returns there is a sharp and immediate negative reaction in the equity market following a rise in the federal funds rate. This conforms to conventional theory that higher interest rates increase the cost of borrowing and reduce investor risk appetite. This leading to a drop in equity markets.
+
+In unemployment the response is delayed but negative, indicating a gradual increase in unemployment following a policy tightening. This lag is consistent with the labor market's rigidity as firms adjust hiring and firing decisions a lot more slowly than financial markets in terms of reacting to shocks.
+
+The response of inflation to a policy rate shock is negligible in the short run. The confidence bands suggest that any change is statistically insignificant. It implies that inflation expectations are well-anchored, and that overtime there isn't much of a change in that constant rate.
+
+\begin{center}
+\underline{\small \textbf{Granger}}
+\end{center}
+
+we'll now turn to Granger causality tests to formally assess whether one variable has predictive power over another. The Granger causality tests explore whether the past values of one variable help improve the forecast of another. It's not causality but the ability to use one series to gain bountiful information about another series. This test is conducted by examining F-statistics to find the resulting important P-values.
+       Ho ~ Variable x dose not granger cause variable Y
+       Ha ~ Variable x dose granger cause variable Y
+       
+```{r Grange, include=FALSE, warning=FALSE, message=FALSE}
+ #---------------------------
+#  Granger 
+#---------------------------
+# Granger test: Does FF help predict other variables?
+g_ff     <- causality(v_model, cause = "FF")$Granger
+g_sp500  <- causality(v_model, cause = "dlrSP500")$Granger
+g_unrate <- causality(v_model, cause = "UNRATE")$Granger
+g_infl   <- causality(v_model, cause = "INFL")$Granger
+#granger table 
+granger_results <- tibble::tibble(
+  Cause         = c("FF", "dlrSP500", "UNRATE", "INFL"),
+  F_Statistic   = c(g_ff$statistic, g_sp500$statistic, g_unrate$statistic, g_infl$statistic),
+  DF1           = c(g_ff$parameter[1], g_sp500$parameter[1], g_unrate$parameter[1], g_infl$parameter[1]),
+  DF2           = c(g_ff$parameter[2], g_sp500$parameter[2], g_unrate$parameter[2], g_infl$parameter[2]),
+  P_Value       = c(g_ff$p.value, g_sp500$p.value, g_unrate$p.value, g_infl$p.value),
+  Granger_Causes = c(
+    ifelse(g_ff$p.value < 0.05, "Yes", "No"),
+    ifelse(g_sp500$p.value < 0.05, "Yes", "No"),
+    ifelse(g_unrate$p.value < 0.05, "Yes", "No"),
+    ifelse(g_infl$p.value < 0.05, "Yes", "No")
+  )
+)
+```
+
+```{r granger table, echo=FALSE, warning=FALSE, message=FALSE, results = 'asis'}
+#table
+ kable(granger_results, digits = 4, caption = "Granger Causality Test Results")
+```
+Table 3 highlights the results of the Granger tests. The tests reveal that both the Federal Funds Rate, and S&P 500 real returns have Granger cause on at least one other variable in the system. This is indicated by statistically significant F-statistics which are shown in the p-values. The P-values are well below the 1% threshold. This suggests that these variables carry predictive information that improves the forecasting of other macroeconomic indicators within the model.
+
+ The other two variables unemployment and inflation do not Granger-cause any other variable, with p-values of 0.1301 and 0.4168 respectively. This is well above conventional significance levels. This implies that while they may respond to shocks from other series, but their own past values offer limited predictive power for the rest of the system.
+
+This as a whole align well with the idea of the federal fund rate being an exogenous channel of influence on unemployment and inflation through investment driven aggregate demand. The Granger causality findings support the idea that the federal funds rate and stock market returns carry forward looking information that influences Unemplotment and inflation. This strengthens the theoretical justification for the ordering structure proposed earlier in our proposed Structural Vector Auto Regression model.
+
+\begin{center}
+\underline{\small \textbf{Structural Vector Auto Regression }}
+\end{center}
+
+Finally we turn to the Structural Vector Auto Regression model to identify and interpret the structural shocks that drive macroeconomic fluctuations. The Structural Vector Auto Regression imposes theoretical restrictions that allow us to trace causal relationships and isolate exogenous shocks.
+
+Our primary motivation for using an SVAR is to move beyond statistical associations and uncover meaningful economic interpretations. In this case we're particularly interested in the impact of structural monetary policy shocks on key macroeconomic variables. Our first step is to apply a Cholesky decomposition, and this imposes a recursive ordering on the contemporaneous relationships among variables.
+
+Our ordering as stated in the beginning of the paper is Federal Funds Rate -> Log-difference in S&P 500 -> Unemployment Rate -> Inflation. This reflects economic intuition built by examining our var model and our ganger test. Monetary policy is assumed to responds to macroeconomic developments but immediately influences financial markets. Equity markets, adjust quickly to policy signals and can lead labor market changes. Inflation is assumed the most constant reflecting price rigidity, and is assumed to react most sluggishly to shocks.
+
+
+
+```{r svar, echo=FALSE, warning=FALSE, message=FALSE}
+#-----------------------------
+#   svar
+#-----------------------------
+# Estimate SVAR using Cholesky decomposition (recursive identification)
+#colnames(Y)
+svar_model <- svars::id.chol(v_model)
+#irf for svar
+# Generate impulse responses from FF only
+irf_ff <- irf(svar_model, impulse = "FF", 
+              response = c("dlrSP500", "UNRATE", "INFL"), 
+              n.ahead = 24, boot = TRUE)
+plot(irf_ff)
+```
+The graphs above show the impulse response functions from our Structural VAR model. Each subplot shows the effect of a structural shock in one variable on another over a 24-month horizon. Instead of just federal funds it shows all of the possible response functions.
+
+A key observation to note is monetary policy theory aligns with the impulse functions derived. An increase in the Federal Funds Rates causes an immediate drop in real S&P 500 returns. This is consistent with the finding from the vars model and has the same justification. The unemployment rises gradually after a rate hike aligning with the view that monetary contractions slow economic activity, with delayed labor market effects.
+
+However, this model exhibits a small but persistent declines in inflation. This helps bolster the  conventional notion that higher interest rates curb demand driven inflationary pressures over time. This finding is only compounded by the fact that real returns in the equity markets seem to have a smaller but immediate impact on unemployment and inflation.This gives creedence to the threory of interest rates channel change through investments.
+
+\newpage
+\begin{center}
+\underline{\Large \textbf{Conclusion}}
+\end{center}
+This paper looks at  the channels through which monetary policy operates to balance the objectives of the Federal Reserve. In order to analyze how changes in interest rates influence key macroeconomic variables I implemented a Structural Vector Auto Regression framework. Doing this allowed us to augment Vector Auto Regression in a way to inject economic structure into our model. This allowed us to examine the ordered impulse response functions. Our finding with this approach are consitent with traditional economic theory.
+
+\newpage
+\begin{center}
+\underline{\Large \textbf{work cited}}
+\end{center}
+Brischetto, Andrea, and Graham Voss. A STRUCTURAL VECTOR AUTOREGRESSION MODEL of MONETARY POLICY in    AUSTRALIA. 1999.
+
+Federal Reserve Bank of St. Louis. “Unemployment Rate.” Stlouisfed.org, 2024, fred.stlouisfed.org/series/UNRATE.
+
+FRED. “Effective Federal Funds Rate.” Stlouisfed.org, 2025, fred.stlouisfed.org/series/FEDFUNDS.
+
+Sims, Christopher A. “Interpreting the Macroeconomic Time Series Facts.” European Economic Review, vol. 36, no. 5, June 1992, pp. 975–1000, https://doi.org/10.1016/0014-2921(92)90041-t.
+
+Stock, James H, and Mark W Watson. “Vector Autoregressions.” Journal of Economic Perspectives, vol. 15, no. 4, Nov. 2001, pp. 101–115, www.aeaweb.org/articles?id=10.1257/jep.15.4.101, https://doi.org/10.1257/jep.15.4.101.
+
+Tobin, James. “Monetary Policy - Econlib.” Econlib, 2018, www.econlib.org/library/Enc/MonetaryPolicy.html.
+
+U.S. Bureau of Economic Analysis. “Personal Consumption Expenditures Excluding Food and Energy (Chain-Type Price Index).” FRED, Federal Reserve Bank of St. Louis, 1 Jan. 1959, fred.stlouisfed.org/series/PCEPILFE.
+
+Yahoo Finance. “S&P 500 (^GSPC) Charts, Data & News - Yahoo Finance.” Finance.yahoo.com, 2025, finance.yahoo.com/quote/%5EGSPC/.
+
+
+
+
